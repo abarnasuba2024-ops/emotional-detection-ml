@@ -1,10 +1,12 @@
 import streamlit as st
 import pickle
+import re
+import pandas as pd
 
 
-# -----------------------------------
-# Page Configuration
-# -----------------------------------
+# =========================
+# PAGE CONFIG
+# =========================
 
 st.set_page_config(
     page_title="Emotion Detection",
@@ -13,147 +15,278 @@ st.set_page_config(
 )
 
 
-# -----------------------------------
-# Load ML Model
-# -----------------------------------
+# =========================
+# LOAD MODEL
+# =========================
 
-with open("emotion_model.pkl", "rb") as file:
-    model = pickle.load(file)
+@st.cache_resource
+def load_model():
 
-with open("vectorizer.pkl", "rb") as file:
-    vectorizer = pickle.load(file)
+    with open("emotion_model.pkl", "rb") as file:
+        model = pickle.load(file)
+
+    with open("vectorizer.pkl", "rb") as file:
+        vectorizer = pickle.load(file)
+
+    return model, vectorizer
 
 
-# -----------------------------------
-# Emotion Responses
-# -----------------------------------
+model, vectorizer = load_model()
 
-responses = {
-    "happy": {
-        "emoji": "😊",
-        "message": "You seem happy! That's wonderful. Keep enjoying this positive moment! 🎉"
-    },
 
-    "sad": {
-        "emoji": "😢",
-        "message": "You seem sad. It's okay to feel this way. Take some time for yourself."
-    },
+# =========================
+# TEXT CLEANING
+# =========================
 
-    "angry": {
-        "emoji": "😡",
-        "message": "You seem angry. Take a deep breath and give yourself a moment before reacting."
-    },
+def clean_text(text):
 
-    "fear": {
-        "emoji": "😨",
-        "message": "You seem worried or scared. Take a deep breath and focus on what you can control."
-    },
+    text = text.lower()
 
-    "surprise": {
-        "emoji": "😲",
-        "message": "You seem surprised! That sounds unexpected!"
-    },
+    text = re.sub(
+        r"http\S+|www\S+|https\S+",
+        "",
+        text
+    )
 
-    "love": {
-        "emoji": "❤️",
-        "message": "You seem to be expressing love and affection. That's a beautiful feeling!"
-    },
+    text = re.sub(
+        r"[^a-zA-Z\s]",
+        "",
+        text
+    )
 
-    "neutral": {
-        "emoji": "🙂",
-        "message": "I don't detect a strong emotion in your text."
-    }
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    ).strip()
+
+    return text
+
+
+# =========================
+# EMOTION EMOJIS
+# =========================
+
+emotion_emojis = {
+
+    "anger": "😡",
+
+    "fear": "😨",
+
+    "joy": "😄",
+
+    "love": "❤️",
+
+    "sadness": "😢",
+
+    "surprise": "😲"
 }
 
 
-# -----------------------------------
-# Application UI
-# -----------------------------------
+# =========================
+# TITLE
+# =========================
 
-st.title("😊 Emotion Detection from Text")
+st.title("😊 Emotion Detection in Text")
 
 st.write(
-    "Enter any sentence below and the Machine Learning model "
-    "will predict the emotion."
+    "Enter a sentence and the machine learning model "
+    "will detect the emotion."
 )
 
-st.info(
-    "Machine Learning Algorithm: Logistic Regression\n\n"
-    "NLP Technique: TF-IDF Vectorization"
-)
+st.divider()
 
 
-# -----------------------------------
-# Text Input
-# -----------------------------------
+# =========================
+# TEXT INPUT
+# =========================
 
-text = st.text_area(
+user_text = st.text_area(
+
     "Enter your text:",
+
     placeholder="Example: I am very happy today!",
+
     height=150
 )
 
 
-# -----------------------------------
-# Analyze Button
-# -----------------------------------
+# =========================
+# PREDICT BUTTON
+# =========================
 
-if st.button("🔍 Analyze Emotion"):
+if st.button(
+    "🔍 Predict Emotion",
+    use_container_width=True
+):
 
-    if text.strip() == "":
-        st.warning("Please enter some text.")
+    if user_text.strip() == "":
+
+        st.warning(
+            "⚠️ Please enter some text."
+        )
 
     else:
 
-        # Convert text into TF-IDF features
-        text_tfidf = vectorizer.transform([text])
+        # Clean text
 
-        # Predict emotion
-        prediction = model.predict(text_tfidf)[0]
+        cleaned_text = clean_text(user_text)
 
-        # Get prediction probabilities
-        probabilities = model.predict_proba(text_tfidf)[0]
 
-        confidence = max(probabilities) * 100
+        # Convert text to TF-IDF
 
-        # Get response
-        result = responses.get(
+        text_vector = vectorizer.transform(
+            [cleaned_text]
+        )
+
+
+        # Prediction
+
+        prediction = model.predict(
+            text_vector
+        )[0]
+
+
+        # =========================
+        # RESULT
+        # =========================
+
+        st.subheader("Prediction Result")
+
+        emoji = emotion_emojis.get(
             prediction,
-            {
-                "emoji": "🙂",
-                "message": "I could not determine a strong emotion."
-            }
+            "😊"
         )
 
-        # -----------------------------------
-        # Display Result
-        # -----------------------------------
-
-        st.success("Emotion detected successfully!")
-
-        st.markdown(
-            f"# {result['emoji']} {prediction.capitalize()}"
+        st.success(
+            f"{emoji} Detected Emotion: "
+            f"**{prediction.upper()}**"
         )
 
-        st.write(result["message"])
 
-        st.metric(
-            "Model Confidence",
-            f"{confidence:.2f}%"
-        )
+        # =========================
+        # PROBABILITY GRAPH
+        # =========================
 
-        # -----------------------------------
-        # Show Probability
-        # -----------------------------------
+        if hasattr(model, "predict_proba"):
 
-        st.subheader("Emotion Probability")
+            probabilities = model.predict_proba(
+                text_vector
+            )[0]
 
-        probability_data = {
-            emotion.capitalize(): round(prob * 100, 2)
-            for emotion, prob in zip(
-                model.classes_,
-                probabilities
+            classes = model.classes_
+
+
+            # Create dataframe
+
+            probability_data = pd.DataFrame({
+
+                "Emotion": classes,
+
+                "Probability": probabilities
+
+            })
+
+
+            # Convert to percentage
+
+            probability_data["Probability"] = (
+                probability_data["Probability"] * 100
             )
-        }
 
-        st.bar_chart(probability_data)
+
+            # Sort highest probability first
+
+            probability_data = (
+                probability_data
+                .sort_values(
+                    "Probability",
+                    ascending=False
+                )
+            )
+
+
+            st.subheader(
+                "📊 Emotion Probability"
+            )
+
+
+            # Show graph
+
+            st.bar_chart(
+
+                probability_data.set_index(
+                    "Emotion"
+                )["Probability"]
+            )
+
+
+            # =========================
+            # PROBABILITY TABLE
+            # =========================
+
+            st.subheader(
+                "📈 Emotion Scores"
+            )
+
+            display_data = probability_data.copy()
+
+            display_data["Probability"] = (
+                display_data["Probability"]
+                .round(2)
+                .astype(str)
+                + "%"
+            )
+
+            st.dataframe(
+                display_data,
+                use_container_width=True,
+                hide_index=True
+            )
+
+
+# =========================
+# MODEL INFORMATION
+# =========================
+
+st.divider()
+
+st.subheader("📌 Model Information")
+
+col1, col2 = st.columns(2)
+
+with col1:
+
+    st.write(
+        "**Algorithm:** "
+        "TF-IDF + Logistic Regression"
+    )
+
+    st.write(
+        "**Emotions:** 6"
+    )
+
+
+with col2:
+
+    st.write(
+        "**Accuracy:** 88.8%"
+    )
+
+    st.write(
+        "**Dataset:** Emotion Dataset for NLP"
+    )
+
+
+# =========================
+# SUPPORTED EMOTIONS
+# =========================
+
+st.subheader(
+    "🎭 Supported Emotions"
+)
+
+st.write(
+    "😡 Anger   |   😨 Fear   |   😄 Joy   |   "
+    "❤️ Love   |   😢 Sadness   |   😲 Surprise"
+)
